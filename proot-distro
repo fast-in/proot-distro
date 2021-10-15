@@ -1,0 +1,206 @@
+#!/bin/bash -
+
+name=proot-distro
+data=. # path to directory
+
+cache=$data/cache
+rootfs_place=$data/rootfs.d
+plugin=$data/plugin
+
+for dir in "$cache" "$rootfs_place" "$plugin"; do
+	[ -d "$dir" ] || mkdir "$dir" 2>/dev/null || {
+		echo "Failed to create directory $dir" 1>&2
+		exit 1
+	}
+	>"$dir/.lock"
+done
+
+temp=${TMPDIR-/tmp}/$name.$$
+(mkdir -m 0700 "$temp" && touch "$temp/install.sh") 2>/dev/null || {
+	echo 1>&2 "$name: Could not create temporary directory"
+	exit 1
+}
+trap 'rm -r -f "$temp"' 0 1 2 15
+
+# add, install
+# del, remove
+# list
+# login, start
+# reset
+help="\
+Usage: $name <command> [<arguments>]
+
+List of availabe commands:
+  install <distro>
+  list
+  login <distro>
+  remove <distro>
+  reset
+"
+
+req_args() {
+	echo 1>&2 "$name: operation requires arguments"
+	exit 1
+}
+
+[ "$1" ] || {
+	echo "$help" >&2
+	exit 1
+}
+
+# pretty_name, distro, distro_rootfs
+function list { n=0
+	echo "List of availale distributions:"
+	echo
+	for x in `find "$plugin" -type f -name '*.sh'|tr ' ' '\1'`; do
+		file=`echo $x|tr '\1' ' '`
+		if [ -r "$file" ]; then source "$file"
+			echo -e "   \033[1;35m*\033[m Distro: $pretty_name"
+			echo "     Alias: $distro"
+			echo -n "     Status: "
+			if check_installed "$distro_rootfs"; then
+				echo -e "\033[0;92mOK\033[m Installed"
+			else
+				echo -e "\033[0;91mNOT\033[m Installed"
+			fi
+			((n++))
+			echo
+		fi
+	done
+	[ $n = 0 ] && { echo "   * Null"; echo;}
+}
+
+function launch {
+	local args= shell="${DISTRO_SHELL:-/bin/bash} --login" n=0
+
+	mkdir "$temp/unix-tmp" && chmod 1777 "$temp/unix-tmp"
+	for x in `find "$plugin" -type f -name '*.sh'|tr ' ' '\1'`; do
+		file=`echo $x|tr '\1' ' '`
+		if [ -r "$file" ]; then source "$file"
+			((n++))
+			[ "$distro" = "$1" ] && break
+		fi
+	done
+	[ "$distro_rootfs" -a $n = 0 ] && {
+		echo 1>&2 "$name: Internal Error"
+		exit 1
+	}
+	[ "$distro" = "$1" ] || {
+		echo 1>&2 "$name: distribution \`$1' not found"
+		exit 1
+	}
+	if check_installed "$distro_rootfs"; then
+		proot --kill-on-exit true 2>/dev/null && opt="--kill-on-exit "
+		proot --link2symlink true 2>/dev/null && opt+="--link2symlink "
+		proot --sysvipc true 2>/dev/null && opt+="--sysvipc "
+
+		for i in dev proc; do args+=" --bind=/$i"
+		done
+		for i in /storage/self/primary/ /storage/emulated/legacy/; do
+			if [ -d "$i" ]; then
+				echo "$name: mounting $i to /media/sdcard"
+				args+=" --bind=$i:/media/sdcard"
+				break
+			fi
+		done
+		args+=" /usr/bin/env -i"
+		args+=" HOME=/root"
+		args+=" PATH=/usr/local/sbin:/usr/local/bin:/usr/local/games:/usr/sbin:/usr/bin:/usr/games:/sbin:/bin"
+		args+=" TERM=${TERM-xterm-256color}"
+		args+=" MOZ_FAKE_NO_SANDBOX=1"
+		args+=" LANG=C.UTF-8"
+		args+=" TMPDIR=/tmp"
+
+		proot --rootfs="$distro_rootfs" --bind="$temp/unix-tmp":/tmp \
+		      --root-id --cwd=/root $opt $args $shell
+	else
+		echo 1>&2 "$name: distribution \`$distro' not installed"
+		exit 1
+	fi
+}
+
+function install { n=0
+	for x in `find "$plugin" -type f -name '*.sh'|tr ' ' '\1'`; do
+		file=`echo $x|tr '\1' ' '`
+		if [ -r "$file" ]; then source "$file"
+			((n++))
+			[ "$distro" = "$1" ] && break
+		fi
+	done #2>/dev/null
+	[ "$distro" = "$1" -a $n = 0 ] && {
+		echo 1>&2 "$name: Internal Error"
+		exit 1
+	}
+	[ "$distro" = "$1" ] || {
+		echo 1>&2 "$name: distribution \`$1' not found"
+		exit 1
+	}
+
+	chmod u+rx "$temp/install.sh"
+	if check_installed "$distro_rootfs"; then
+		echo 1>&2 "$name: distribution $distro has been installed."
+		exit 1
+	fi
+	eval "$temp/install.sh"
+
+	curl https://raw.githubusercontent.com/fast-in/proot-distro/main/etc/profile|tee "$distro_rootfs/etc/skel/.profile" 1>"$distro_rootfs/root/.profile"
+	curl https://raw.githubusercontent.com/fast-in/proot-distro/main/etc/bashrc |tee "$distro_rootfs/etc/skel/.bashrc"  1>"$distro_rootfs/root/.bashrc"
+}
+
+function remove { n=0
+	for x in `find "$plugin" -type f -name '*.sh'|tr ' ' '\1'`; do
+		file=`echo $x|tr '\1' ' '`
+		if [ -r "$file" ]; then source "$file"
+			((n++))
+			[ "$distro" = "$1" ] && break
+		fi
+	done 2>/dev/null
+
+	[ "$distro" = "$1" ] || {
+		echo 1>&2 "$name: distribution \`$1' not found"
+		exit 1
+	}
+	[ -d "$distro_rootfs" ] && {
+		chmod 777 -R "$distro_rootfs"
+		rm -r -f "$distro_rootfs"
+	}
+}
+
+
+cmd=$1
+shift
+
+check_installed() {
+	if [ -d "$1/usr" ]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+for i in curl proot mkdir tar rm; do
+	[ "$(command -v $i)" ] || {
+		echo "$name: $i not found!" >&2
+		exit 1
+	}
+done
+case "$cmd" in
+	launch|start|login)
+		[ "$1" ] || req_args
+		launch "$@";;
+	list) list;;
+	add|inst*l)
+		[ "$1" ] || req_args
+		install "$@";;
+	del*|rem*|rm|unin*l)
+		[ "$1" ] || req_args
+		remove "$@";;
+	re*t|rei*l)
+		[ "$1" ] || req_args
+		remove "$@"
+		install "$@";;
+	help|-h|--help) echo "$help"; exit;;
+	*)
+		echo 1>&2 "$name: command \`$cmd' not found."
+		exit 1
+esac

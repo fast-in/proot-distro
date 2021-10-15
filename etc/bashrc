@@ -1,0 +1,55 @@
+# If not running interactively, don't do anything
+case $- in
+	*i*) ;;
+	*) return
+esac
+
+# See bash(1) for more options
+HISTCONTROL=ignoreboth
+
+# append to the history file, don't overwrite it
+shopt -s histappend
+
+# Reduce memory usage by turning off save history
+HISTFILE=
+HISTSIZE=
+HISTFILESIZE=
+
+# check the window size after each command and, if necessary,
+# update the values of LINES and COLUMNS.
+shopt -s checkwinsize
+
+# enable color support of ls and also add handy aliases
+if [ -x /usr/bin/dircolors ]; then
+	[ -f ~/.dircolors -a -r ~/.dircolors ] && eval "$(dircolors -b ~/.dircolors)"
+	for i in ls dir vdir; do
+		alias $i="$i --color=auto"
+	done
+	unset i
+
+	alias egrep='grep -E'
+	alias fgrep='grep -F'
+	alias grep='grep --color=auto'
+fi
+
+# colored GCC warnings and errors
+export GCC_COLORS="error=01;31:warning=01;35:note=01;36:caret=01;32:locus=01:quote=01"
+
+# some more ls aliases
+alias l='ls -CF'
+alias la='ls -AC'
+alias ll='ls -AClF'
+
+# Add an "alert" alias for long running commands. Use like so:
+#  sleep 10; alert
+alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history|tail -n1|sed -e '\''s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//'\'')"'
+
+case "$TERM" in xterm|*-256color) color_prompt=yes
+esac
+
+if [ "$color_prompt" = yes ]; then
+	PS1='\[\033[0;93m\]\h\[\033[m\]:\[\033[0;90m\][\[\033[0;32m\]\w\[\033[0;90m\]] \[\033[0;34m\]\$\[\033[m\] '
+else
+	PS1='\h:[\w] \s '
+fi
+unset color_prompt

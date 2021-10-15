@@ -1,0 +1,8 @@
+# if running bash
+if [ "$BASH_VERSION" ]; then
+	[ -f "$HOME/.bashrc" -a -r "$HOME/.bashrc" ] \
+	&& . "$HOME/.bashrc"
+fi
+
+# set PATH so it includes user's private bin directories
+PATH="$HOME/bin:$HOME/.local/bin:$PATH"

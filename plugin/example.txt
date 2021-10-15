@@ -1,0 +1,10 @@
+
+distro=Example
+pretty_name="Example to Install"
+distro_rootfs=$rootfs_place/$distro-rootfs
+
+tarball='Not.found'
+
+cat > "$temp/install.sh" << EOM
+echo "good"
+EOM
